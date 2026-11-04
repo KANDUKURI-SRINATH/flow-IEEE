@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="CertiFlow: upload student data once, generate personalized certificates automatically and email each student their own certificate." />
+  <title>CertiFlow · Certificate Automation Platform</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%234f46e5'/><path d='M18 20h28v20H18z' fill='none' stroke='white' stroke-width='4'/><circle cx='40' cy='44' r='8' fill='%23fbbf24'/></svg>" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<!-- ================= LOCK SCREEN (Rule 15) ================= -->
+<div id="lock" class="lock" hidden>
+  <form id="lockForm" class="lock-card" autocomplete="off">
+    <div class="brand brand-lg"><span class="logo">CF</span><span>CertiFlow</span></div>
+    <h2 id="lockTitle">Organizer access</h2>
+    <p id="lockHint" class="muted">Enter your organizer passcode to continue.</p>
+    <input id="lockPass" type="password" placeholder="Passcode" minlength="4" required />
+    <input id="lockPass2" type="password" placeholder="Confirm passcode" minlength="4" hidden />
+    <p id="lockErr" class="error-text" hidden></p>
+    <button class="btn btn-primary btn-block" type="submit" id="lockBtn">Unlock</button>
+    <p class="tiny muted">Student data stays in this browser tab and is never uploaded except to send each student's own email.</p>
+  </form>
+</div>
+
+<div class="app" id="app">
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">CF</span><span>CertiFlow</span></div>
+    <p class="tagline">Upload once. Generate automatically. Deliver accurately.</p>
+    <nav class="steps" id="steps">
+      <button data-step="upload" class="step active"><span class="num">1</span><span><b>Upload data</b><small>Excel / CSV</small></span></button>
+      <button data-step="validate" class="step"><span class="num">2</span><span><b>Validate</b><small>Names, emails, duplicates</small></span></button>
+      <button data-step="template" class="step"><span class="num">3</span><span><b>Template</b><small>Design &amp; placeholders</small></span></button>
+      <button data-step="map" class="step"><span class="num">4</span><span><b>Map fields</b><small>Columns → {{PLACEHOLDERS}}</small></span></button>
+      <button data-step="preview" class="step"><span class="num">5</span><span><b>Email &amp; preview</b><small>Check before sending</small></span></button>
+      <button data-step="run" class="step"><span class="num">6</span><span><b>Generate &amp; send</b><small>Bulk processing</small></span></button>
+      <button data-step="report" class="step"><span class="num">7</span><span><b>Status report</b><small>Sent, failed, pending</small></span></button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="mode-pill" id="modePill">Mode: Simulation</div>
+      <button class="btn btn-ghost btn-sm" id="lockNow" title="Lock the app">🔒 Lock</button>
+      <button class="btn btn-ghost btn-sm" id="wipeAll" title="Clear student data and settings">🧹 Clear data</button>
+    </div>
+  </aside>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">Upload student data</h1>
+        <p class="muted" id="pageSub">Start by uploading a structured Excel (.xlsx/.xls) or CSV file.</p>
+      </div>
+      <div class="kpis" id="topKpis">
+        <div class="kpi"><span id="kTotal">0</span><small>Records</small></div>
+        <div class="kpi ok"><span id="kValid">0</span><small>Eligible</small></div>
+        <div class="kpi bad"><span id="kInvalid">0</span><small>Invalid</small></div>
+        <div class="kpi info"><span id="kSent">0</span><small>Sent</small></div>
+      </div>
+    </header>
+
+    <!-- ========== STEP 1: UPLOAD ========== -->
+    <section class="panel" data-panel="upload">
+      <div class="card">
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.tsv,.txt" hidden />
+          <div class="dz-icon">📄</div>
+          <div><b>Drop your Excel or CSV file here</b><br /><span class="muted">or click to browse · .xlsx, .xls, .csv</span></div>
+        </label>
+        <div class="row gap wrap mt">
+          <button class="btn" id="loadSample">Load sample student data</button>
+          <a class="btn btn-ghost" href="samples/students_sample.csv" download>Download sample CSV</a>
+          <a class="btn btn-ghost" href="samples/students_sample.xlsx" download>Download sample Excel</a>
+        </div>
+      </div>
+
+      <div class="card" id="fileInfo" hidden>
+        <div class="row between wrap gap">
+          <div>
+            <h3 id="fileName">file.xlsx</h3>
+            <p class="muted" id="fileMeta"></p>
+          </div>
+          <div class="row gap">
+            <label class="field inline" id="sheetWrap" hidden>Sheet
+              <select id="sheetSelect"></select>
+            </label>
+            <label class="field inline">Header row
+              <input type="number" id="headerRow" min="1" value="1" style="width:70px" />
+            </label>
+          </div>
+        </div>
+        <div class="chips" id="columnChips"></div>
+        <div class="table-wrap small-table"><table id="rawPreview"></table></div>
+        <div class="row end mt"><button class="btn btn-primary" data-goto="validate">Continue to validation →</button></div>
+      </div>
+    </section>
+
+    <!-- ========== STEP 2: VALIDATE ========== -->
+    <section class="panel" data-panel="validate" hidden>
+      <div class="card">
+        <h3>Key columns</h3>
+        <p class="muted">Auto-detected from your headers. Adjust if needed.</p>
+        <div class="grid grid-4">
+          <label class="field">Student name column <select id="colName"></select></label>
+          <label class="field">Student ID column <select id="colId"></select></label>
+          <label class="field">Event column <select id="colEvent"></select></label>
+          <label class="field">Duplicate check key
+            <select id="dupKey">
+              <option value="id+event">Student ID + Event</option>
+              <option value="email+event">Email + Event</option>
+              <option value="id">Student ID</option>
+              <option value="email">Email</option>
+              <option value="name+email">Name + Email</option>
+            </select>
+          </label>
+        </div>
+        <h3 class="mt">Email selection <span class="tag">Rule 7</span></h3>
+        <div class="grid grid-4">
+          <label class="field">Preferred email column <select id="colEmail"></select></label>
+          <label class="field">Fallback email column <select id="colEmail2"></select></label>
+          <label class="field">Fallback when preferred is
+            <select id="fallbackWhen">
+              <option value="invalid">missing or invalid</option>
+              <option value="missing">missing only</option>
+              <option value="never">never use fallback</option>
+            </select>
+          </label>
+          <label class="field">Required columns
+            <div class="multi" id="requiredCols"></div>
+          </label>
+        </div>
+        <div class="row gap wrap mt">
+          <label class="check"><input type="checkbox" id="optTrim" checked /> Trim extra spaces</label>
+          <label class="check"><input type="checkbox" id="optTitle" /> Auto Title-Case names</label>
+          <label class="check"><input type="checkbox" id="optLowerEmail" checked /> Lower-case emails</label>
+          <button class="btn btn-primary" id="runValidate">Re-run validation</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row between wrap gap">
+          <div class="seg" id="valFilter">
+            <button data-f="all" class="on">All <span id="fAll">0</span></button>
+            <button data-f="valid">Valid <span id="fValid">0</span></button>
+            <button data-f="warning">Warnings <span id="fWarn">0</span></button>
+            <button data-f="error">Errors <span id="fErr">0</span></button>
+            <button data-f="excluded">Excluded <span id="fExcl">0</span></button>
+          </div>
+          <div class="row gap">
+            <input type="search" id="valSearch" placeholder="Search name, ID, email…" />
+            <button class="btn btn-ghost" id="exportIssues">Export issues CSV</button>
+          </div>
+        </div>
+        <p class="tiny muted mt-s">Tip: click any cell to fix it inline. Validation re-runs automatically. Uncheck "Use" to exclude a record.</p>
+        <div class="table-wrap"><table id="valTable" class="data-table"></table></div>
+        <div class="row end mt"><button class="btn btn-primary" data-goto="template">Continue to template →</button></div>
+      </div>
+    </section>
+
+    <!-- ========== STEP 3: TEMPLATE ========== -->
+    <section class="panel" data-panel="template" hidden>
+      <div class="template-layout">
+        <div class="card canvas-card">
+          <div class="row between wrap gap">
+            <div class="seg" id="designSeg">
+              <button data-design="classic" class="on">Classic Gold</button>
+              <button data-design="modern">Modern Blue</button>
+              <button data-design="elegant">Elegant Emerald</button>
+              <button data-design="custom">Uploaded image</button>
+            </div>
+            <div class="row gap">
+              <label class="btn btn-ghost btn-sm">🖼 Upload template image
+                <input type="file" id="bgInput" accept="image/png,image/jpeg,image/webp" hidden />
+              </label>
+              <label class="btn btn-ghost btn-sm">🏷 Upload logo
+                <input type="file" id="logoInput" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
+              </label>
+            </div>
+          </div>
+          <div class="canvas-wrap"><canvas id="tplCanvas" width="1754" height="1240"></canvas></div>
+          <p class="tiny muted">Drag text on the certificate to reposition it. Arrow keys nudge the selected element (Shift = bigger steps). Sample values come from the first eligible record.</p>
+        </div>
+        <div class="card side">
+          <div class="row between"><h3>Elements</h3>
+            <div class="row gap-s">
+              <button class="btn btn-sm" id="addText">+ Text</button>
+              <button class="btn btn-sm btn-ghost" id="resetTpl" title="Reset design defaults">Reset</button>
+            </div>
+          </div>
+          <ul class="el-list" id="elList"></ul>
+          <div id="elProps" class="props" hidden>
+            <label class="field">Text (use {{PLACEHOLDERS}})<textarea id="pText" rows="2"></textarea></label>
+            <div class="chips" id="pChips"></div>
+            <div class="grid grid-2">
+              <label class="field">Font
+                <select id="pFont">
+                  <option value="Georgia, 'Times New Roman', serif">Georgia (serif)</option>
+                  <option value="'Times New Roman', Times, serif">Times New Roman</option>
+                  <option value="'Palatino Linotype', 'Book Antiqua', Palatino, serif">Palatino</option>
+                  <option value="'Segoe UI', Arial, sans-serif">Segoe UI (sans)</option>
+                  <option value="Arial, Helvetica, sans-serif">Arial</option>
+                  <option value="'Trebuchet MS', sans-serif">Trebuchet</option>
+                  <option value="'Segoe Script', 'Brush Script MT', 'Lucida Handwriting', cursive">Script</option>
+                  <option value="'Lucida Handwriting', 'Segoe Script', cursive">Handwriting</option>
+                </select>
+              </label>
+              <label class="field">Size (px)<input type="number" id="pSize" min="8" max="240" /></label>
+              <label class="field">Color<input type="color" id="pColor" /></label>
+              <label class="field">Align
+                <select id="pAlign"><option value="center">Center</option><option value="left">Left</option><option value="right">Right</option></select>
+              </label>
+              <label class="field">Max width (%)<input type="number" id="pMaxW" min="5" max="100" /></label>
+              <label class="field">Letter spacing<input type="number" id="pSpacing" min="0" max="40" /></label>
+            </div>
+            <div class="row gap wrap">
+              <label class="check"><input type="checkbox" id="pBold" /> Bold</label>
+              <label class="check"><input type="checkbox" id="pItalic" /> Italic</label>
+              <label class="check"><input type="checkbox" id="pUpper" /> UPPERCASE</label>
+              <label class="check"><input type="checkbox" id="pFit" /> Shrink to fit</label>
+            </div>
+            <div class="row between mt-s">
+              <button class="btn btn-sm btn-ghost" id="centerEl">Center horizontally</button>
+              <button class="btn btn-sm btn-danger" id="delEl">Delete</button>
+            </div>
+          </div>
+          <hr />
+          <div class="row gap wrap">
+            <button class="btn btn-sm btn-ghost" id="exportTpl">Export template</button>
+            <label class="btn btn-sm btn-ghost">Import template<input type="file" id="importTpl" accept=".json" hidden /></label>
+          </div>
+          <div class="row end mt"><button class="btn btn-primary" data-goto="map">Continue to mapping →</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== STEP 4: MAP ========== -->
+    <section class="panel" data-panel="map" hidden>
+      <div class="card">
+        <h3>Placeholder mapping <span class="tag">Rule 2</span></h3>
+        <p class="muted">Every placeholder found in your certificate, email subject, email body and file name is listed here. Map each one to a spreadsheet column, a fixed value, or a system value.</p>
+        <div class="table-wrap"><table id="mapTable" class="data-table map-table"></table></div>
+        <p id="mapWarn" class="warn-box" hidden></p>
+      </div>
+      <div class="card">
+        <h3>Certificate file naming <span class="tag">Rule 14</span></h3>
+        <div class="grid grid-2">
+          <label class="field">File name pattern<input id="namePattern" value="{{ID}}_{{NAME}}_{{EVENT}}" /></label>
+          <label class="field">Example<input id="nameExample" readonly /></label>
+        </div>
+        <p class="tiny muted">Unsafe characters are removed automatically and duplicates get a numeric suffix. ".pdf" is added for you.</p>
+        <div class="row end mt"><button class="btn btn-primary" data-goto="preview">Continue to email &amp; preview →</button></div>
+      </div>
+    </section>
+
+    <!-- ========== STEP 5: PREVIEW ========== -->
+    <section class="panel" data-panel="preview" hidden>
+      <div class="card">
+        <div class="row between wrap gap">
+          <div class="row gap">
+            <button class="btn btn-sm" id="pvPrev">◀</button>
+            <select id="pvSelect" class="pv-select"></select>
+            <button class="btn btn-sm" id="pvNext">▶</button>
+            <button class="btn btn-sm btn-ghost" id="pvRandom">🎲 Random</button>
+          </div>
+          <span class="muted" id="pvCounter"></span>
+        </div>
+      </div>
+      <div class="preview-layout">
+        <div class="card">
+          <h3>Certificate preview</h3>
+          <div class="canvas-wrap"><canvas id="pvCanvas" width="1754" height="1240"></canvas></div>
+          <p class="tiny muted" id="pvFile"></p>
+        </div>
+        <div class="card">
+          <h3>Email preview</h3>
+          <div class="mail-head">
+            <div><span class="muted">To:</span> <b id="pvTo"></b> <span id="pvToNote" class="tiny muted"></span></div>
+            <div><span class="muted">Subject:</span> <b id="pvSubject"></b></div>
+            <div><span class="muted">Attachment:</span> <span class="attach" id="pvAttach"></span></div>
+          </div>
+          <iframe id="pvMail" class="mail-frame" sandbox="" title="Email preview"></iframe>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Personalized email template <span class="tag">Rule 5</span></h3>
+        <label class="field">Subject<input id="mailSubject" /></label>
+        <div class="row between wrap"><span class="field-label">Body (HTML allowed; data values are safely escaped)</span>
+          <div class="chips" id="mailChips"></div></div>
+        <textarea id="mailBody" rows="12" class="code"></textarea>
+        <div class="row gap mt-s"><button class="btn btn-sm btn-ghost" id="resetMail">Reset to default email</button></div>
+      </div>
+      <div class="row end"><button class="btn btn-primary" data-goto="run">Looks good, go to generate &amp; send →</button></div>
+    </section>
+
+    <!-- ========== STEP 6: RUN ========== -->
+    <section class="panel" data-panel="run" hidden>
+      <div class="grid grid-2">
+        <div class="card">
+          <h3>Delivery settings</h3>
+          <label class="field">Delivery mode
+            <select id="mode">
+              <option value="simulation">Simulation (demo, no real emails)</option>
+              <option value="smtp">Real email via secure SMTP relay (node server.js)</option>
+            </select>
+          </label>
+          <div id="smtpBox" hidden>
+            <label class="field">Relay server URL<input id="serverUrl" placeholder="http://localhost:3000" /></label>
+            <label class="field">Organizer token (ADMIN_TOKEN from .env)<input id="token" type="password" autocomplete="off" /></label>
+            <div class="row gap wrap">
+              <button class="btn btn-sm" id="testConn">Test connection</button>
+              <span id="connStatus" class="tiny muted"></span>
+            </div>
+            <p class="tiny muted">The token is kept only for this browser tab. SMTP passwords stay on the server.</p>
+          </div>
+          <div id="simBox">
+            <label class="field">Simulated random failure rate (%)<input type="number" id="simFail" min="0" max="80" value="8" /></label>
+            <p class="tiny muted">Addresses containing "bounce" or "invalid" always fail permanently, so you can demo failure handling.</p>
+          </div>
+          <div class="grid grid-3">
+            <label class="field">Parallel sends<input type="number" id="concurrency" min="1" max="10" value="3" /></label>
+            <label class="field">Delay between (ms)<input type="number" id="delay" min="0" max="10000" value="150" /></label>
+            <label class="field">Auto-retries<input type="number" id="retries" min="0" max="5" value="2" /></label>
+          </div>
+          <label class="check"><input type="checkbox" id="allowResend" /> Allow authorized re-send to students who already received this certificate <span class="tag">Rule 13</span></label>
+        </div>
+        <div class="card">
+          <h3>Send a test first</h3>
+          <p class="muted">Sends the currently previewed student's certificate and email to an address you choose. The status of that student is not changed.</p>
+          <div class="row gap"><input type="email" id="testTo" placeholder="you@example.com" /><button class="btn" id="sendTest">Send test</button></div>
+          <hr />
+          <h3>Batch</h3>
+          <div class="row gap wrap">
+            <button class="btn btn-primary" id="btnGenerate">① Generate certificates</button>
+            <button class="btn" id="btnZip" disabled>⬇ Download all (ZIP)</button>
+            <button class="btn btn-success" id="btnSend" disabled>② Send emails</button>
+          </div>
+          <div class="row gap wrap mt-s">
+            <button class="btn btn-sm btn-ghost" id="btnPause" disabled>⏸ Pause</button>
+            <button class="btn btn-sm btn-ghost" id="btnStop" disabled>⏹ Stop</button>
+            <button class="btn btn-sm btn-warn" id="btnRetry" disabled>↻ Retry failed</button>
+          </div>
+          <div class="progress-block">
+            <div class="row between"><span>Generation</span><span id="genText">0 / 0</span></div>
+            <div class="bar"><div id="genBar"></div></div>
+            <div class="row between"><span>Delivery</span><span id="sendText">0 / 0</span></div>
+            <div class="bar"><div id="sendBar" class="green"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row between"><h3>Live activity log</h3><button class="btn btn-sm btn-ghost" id="clearLog">Clear</button></div>
+        <div class="log" id="log"></div>
+      </div>
+      <div class="row end"><button class="btn btn-primary" data-goto="report">View status report →</button></div>
+    </section>
+
+    <!-- ========== STEP 7: REPORT ========== -->
+    <section class="panel" data-panel="report" hidden>
+      <div class="stat-grid" id="statGrid"></div>
+      <div class="card">
+        <div class="stack-bar" id="stackBar"></div>
+        <div class="legend" id="stackLegend"></div>
+      </div>
+      <div class="card">
+        <div class="row between wrap gap">
+          <div class="seg" id="repFilter">
+            <button data-f="all" class="on">All</button>
+            <button data-f="Pending">Pending</button>
+            <button data-f="Generated">Generated</button>
+            <button data-f="Sending">Sending</button>
+            <button data-f="Sent">Sent</button>
+            <button data-f="Failed">Failed</button>
+            <button data-f="Skipped">Skipped</button>
+          </div>
+          <div class="row gap">
+            <input type="search" id="repSearch" placeholder="Search…" />
+            <button class="btn btn-ghost" id="exportReport">Export report CSV</button>
+            <button class="btn btn-ghost" id="printReport">Print</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="repTable" class="data-table"></table></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<!-- Libraries (bundled locally so the app works offline) -->
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<!-- App -->
+<script src="js/utils.js"></script>
+<script src="js/data.js"></script>
+<script src="js/template.js"></script>
+<script src="js/mailer.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
